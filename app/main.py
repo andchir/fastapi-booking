@@ -40,6 +40,7 @@ app = FastAPI(
     title=settings.app_name,
     dependencies=[Depends(require_api_key)],
     lifespan=lifespan,
+    swagger_ui_parameters={"persistAuthorization": True},
 )
 app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
