@@ -158,22 +158,3 @@ curl "http://127.0.0.1:8000/objects/{uuid}/booked-dates?access_key={access_key}&
 
 Публичный `GET /objects/{uuid}` по-прежнему возвращает только массив дат без заметок.
 
-## Обновление существующей базы
-
-Если таблица `booked_dates` уже создана, добавьте колонку вручную:
-
-```sql
-ALTER TABLE booked_dates ADD COLUMN note VARCHAR(255) NULL;
-```
-
-Если таблица `booking_objects` уже создана с обязательным `image`, разрешите `NULL`:
-
-```sql
-ALTER TABLE booking_objects MODIFY COLUMN image VARCHAR(2048) NULL;
-```
-
-Если `description` тоже была обязательной:
-
-```sql
-ALTER TABLE booking_objects MODIFY COLUMN description TEXT NULL;
-```
