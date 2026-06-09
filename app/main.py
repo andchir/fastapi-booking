@@ -343,15 +343,17 @@ async def delete_booked_date(
     require_object_access(booking_object, access_key)
 
     result = await session.execute(
-        delete(BookedDate).where(
+        select(BookedDate).where(
             BookedDate.booking_object_id == booking_object.id,
             BookedDate.date == booked_date,
         )
     )
-    if result.rowcount == 0:
+    booked = result.scalar_one_or_none()
+    if booked is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booked date not found.",
         )
 
+    await session.delete(booked)
     await session.commit()
