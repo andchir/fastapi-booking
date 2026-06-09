@@ -6,7 +6,17 @@ from shutil import copyfileobj
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +28,8 @@ from app.db import create_db_schema, get_session
 from app.models import BookedDate, BookingObject
 from app.schemas import (
     BookingDateAdd,
+    BookingDateNoteUpdate,
+    BookingDateWithNoteResponse,
     BookingDatesReplace,
     BookingDatesResponse,
     BookingDatesWithNotesResponse,
@@ -279,3 +291,66 @@ async def replace_booked_dates(
         uuid=booking_object.uuid,
         booked_dates=[booked.date for booked in booking_object.booked_dates],
     )
+
+
+@app.patch(
+    "/objects/{object_uuid}/booked-dates/{booked_date}",
+    response_model=BookingDateWithNoteResponse,
+)
+async def update_booked_date_note(
+    object_uuid: UUID,
+    booked_date: date,
+    payload: BookingDateNoteUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> BookingDateWithNoteResponse:
+    booking_object = await get_object_or_404(session, object_uuid)
+    require_object_access(booking_object, payload.access_key)
+
+    result = await session.execute(
+        select(BookedDate).where(
+            BookedDate.booking_object_id == booking_object.id,
+            BookedDate.date == booked_date,
+        )
+    )
+    booked = result.scalar_one_or_none()
+    if booked is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booked date not found.",
+        )
+
+    booked.note = payload.note
+    await session.commit()
+    await session.refresh(booked)
+    return BookingDateWithNoteResponse(
+        uuid=booking_object.uuid,
+        booked_date={"date": booked.date, "note": booked.note},
+    )
+
+
+@app.delete(
+    "/objects/{object_uuid}/booked-dates/{booked_date}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_booked_date(
+    object_uuid: UUID,
+    booked_date: date,
+    access_key: Annotated[str, Query(min_length=32, max_length=128)],
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    booking_object = await get_object_or_404(session, object_uuid)
+    require_object_access(booking_object, access_key)
+
+    result = await session.execute(
+        delete(BookedDate).where(
+            BookedDate.booking_object_id == booking_object.id,
+            BookedDate.date == booked_date,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booked date not found.",
+        )
+
+    await session.commit()

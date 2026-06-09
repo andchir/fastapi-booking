@@ -58,6 +58,16 @@ class BookedDateWithNote(BaseModel):
     note: str | None = None
 
 
+class BookingDateNoteUpdate(BaseModel):
+    access_key: str = Field(min_length=32, max_length=128)
+    note: str | None = Field(default=None, max_length=255)
+
+
+class BookingDateWithNoteResponse(BaseModel):
+    uuid: UUID
+    booked_date: BookedDateWithNote
+
+
 class BookingObjectRead(BookingObjectBase):
     uuid: UUID
     booked_dates: list[date_type]
