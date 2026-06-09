@@ -48,6 +48,11 @@ uvicorn app.main:app --reload
 - `APP_NAME` - название приложения в OpenAPI.
 - `UPLOAD_DIR` - локальная папка для загруженных изображений, по умолчанию `uploads`.
 
+## Сгенерировать АПИ ключ
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
 ## Примеры
 
 Создать объект:
