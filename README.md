@@ -5,14 +5,15 @@ REST API для бронирования дат на FastAPI + MySQL.
 ## Возможности
 
 - общий API ключ для всех роутов через `X-API-Key`;
-- создание объекта бронирования: `title`, загружаемое `image`, `description`, `booked_dates`, `uuid`;
-- сохранение изображений в локальную папку и выдача публичного URL через `/uploads/...`;
+- создание объекта бронирования: `title`, опциональные `image` и `description`, `booked_dates`, `uuid`;
+- сохранение загруженных изображений в локальную папку и выдача публичного URL через `/uploads/...`;
 - автоматическая выдача `access_key` при создании объекта;
 - все операции с объектом выполняются через `uuid` объекта;
-- редактирование объекта и замена дат защищены `access_key`;
+- редактирование объекта, замена дат и просмотр заметок к датам защищены `access_key`;
 - добавление новых дат требует только общий `X-API-Key` и `uuid` объекта;
 - добавление одной даты или периода дат;
 - замена полного массива забронированных дат;
+- короткая заметка `note` для забронированной даты, которая не попадает в публичный вывод объекта;
 - уникальность даты внутри объекта enforced на уровне MySQL.
 
 ## Запуск
@@ -55,13 +56,11 @@ uvicorn app.main:app --reload
 curl -X POST http://127.0.0.1:8000/objects \
   -H "X-API-Key: change-me" \
   -F "title=Дом у озера" \
-  -F "description=Тихое место для отдыха" \
   -F "booked_dates=2026-07-01" \
-  -F "booked_dates=2026-07-02" \
-  -F "image=@./house.jpg"
+  -F "booked_dates=2026-07-02"
 ```
 
-Ответ содержит `uuid`, `access_key` и `image` с готовым URL для доступа к загруженному файлу. `access_key` нужно сохранить: он используется для изменения конкретного объекта.
+Если передать `-F "image=@./house.jpg"`, ответ содержит `image` с готовым URL для доступа к загруженному файлу. Без файла `image` будет `null`. `access_key` нужно сохранить: он используется для изменения конкретного объекта.
 
 Добавить одну дату:
 
@@ -70,7 +69,8 @@ curl -X POST http://127.0.0.1:8000/objects/{uuid}/booked-dates \
   -H "X-API-Key: change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "date": "2026-07-03"
+    "date": "2026-07-03",
+    "note": "Предоплата внесена"
   }'
 ```
 
@@ -82,7 +82,8 @@ curl -X POST http://127.0.0.1:8000/objects/{uuid}/booked-dates \
   -H "Content-Type: application/json" \
   -d '{
     "start_date": "2026-07-10",
-    "end_date": "2026-07-15"
+    "end_date": "2026-07-15",
+    "note": "Закрыто для обслуживания"
   }'
 ```
 
@@ -104,6 +105,47 @@ curl -X PUT http://127.0.0.1:8000/objects/{uuid}/booked-dates \
   -H "Content-Type: application/json" \
   -d '{
     "access_key": "{access_key}",
-    "booked_dates": ["2026-08-01", "2026-08-02"]
+    "booked_dates": [
+      {"date": "2026-08-01", "note": "Гость подтвердил"},
+      {"date": "2026-08-02", "note": null}
+    ]
   }'
+```
+
+Старый формат без заметок тоже поддерживается:
+
+```json
+{
+  "access_key": "{access_key}",
+  "booked_dates": ["2026-08-01", "2026-08-02"]
+}
+```
+
+Получить даты с заметками:
+
+```bash
+curl "http://127.0.0.1:8000/objects/{uuid}/booked-dates?access_key={access_key}&start_date=2026-08-01&end_date=2026-08-31" \
+  -H "X-API-Key: change-me"
+```
+
+Публичный `GET /objects/{uuid}` по-прежнему возвращает только массив дат без заметок.
+
+## Обновление существующей базы
+
+Если таблица `booked_dates` уже создана, добавьте колонку вручную:
+
+```sql
+ALTER TABLE booked_dates ADD COLUMN note VARCHAR(255) NULL;
+```
+
+Если таблица `booking_objects` уже создана с обязательным `image`, разрешите `NULL`:
+
+```sql
+ALTER TABLE booking_objects MODIFY COLUMN image VARCHAR(2048) NULL;
+```
+
+Если `description` тоже была обязательной:
+
+```sql
+ALTER TABLE booking_objects MODIFY COLUMN description TEXT NULL;
 ```

@@ -18,8 +18,8 @@ class BookingObject(Base):
     uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=new_uuid)
     access_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
-    image: Mapped[str] = mapped_column(String(2048))
-    description: Mapped[str] = mapped_column(Text)
+    image: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -46,5 +46,6 @@ class BookedDate(Base):
         ForeignKey("booking_objects.id", ondelete="CASCADE"), index=True
     )
     date: Mapped[date] = mapped_column(Date)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     booking_object: Mapped[BookingObject] = relationship(back_populates="booked_dates")

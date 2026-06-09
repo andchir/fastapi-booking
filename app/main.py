@@ -6,7 +6,7 @@ from shutil import copyfileobj
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +20,7 @@ from app.schemas import (
     BookingDateAdd,
     BookingDatesReplace,
     BookingDatesResponse,
+    BookingDatesWithNotesResponse,
     BookingObjectCreateResponse,
     BookingObjectRead,
 )
@@ -128,12 +129,12 @@ async def health() -> dict[str, str]:
 async def create_object(
     request: Request,
     title: Annotated[str, Form(min_length=1, max_length=255)],
-    description: Annotated[str, Form(min_length=1)],
-    image: Annotated[UploadFile, File()],
+    image: Annotated[UploadFile | None, File()] = None,
+    description: Annotated[str | None, Form(min_length=1)] = None,
     booked_dates: Annotated[list[date] | None, Form()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> BookingObjectCreateResponse:
-    image_url = save_uploaded_image(request, image)
+    image_url = save_uploaded_image(request, image) if image is not None else None
     booking_object = BookingObject(
         access_key=token_urlsafe(32),
         title=title,
@@ -190,7 +191,13 @@ async def add_booked_dates(
     booking_object = await get_object_or_404(session, object_uuid)
 
     for value in dates_from_request(payload):
-        session.add(BookedDate(booking_object_id=booking_object.id, date=value))
+        session.add(
+            BookedDate(
+                booking_object_id=booking_object.id,
+                date=value,
+                note=payload.note,
+            )
+        )
 
     try:
         await session.commit()
@@ -208,6 +215,43 @@ async def add_booked_dates(
     )
 
 
+@app.get(
+    "/objects/{object_uuid}/booked-dates",
+    response_model=BookingDatesWithNotesResponse,
+)
+async def get_booked_dates_with_notes(
+    object_uuid: UUID,
+    access_key: Annotated[str, Query(min_length=32, max_length=128)],
+    start_date: date | None = None,
+    end_date: date | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> BookingDatesWithNotesResponse:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be earlier than or equal to end_date.",
+        )
+
+    booking_object = await get_object_or_404(session, object_uuid)
+    require_object_access(booking_object, access_key)
+
+    statement = select(BookedDate).where(BookedDate.booking_object_id == booking_object.id)
+    if start_date is not None:
+        statement = statement.where(BookedDate.date >= start_date)
+    if end_date is not None:
+        statement = statement.where(BookedDate.date <= end_date)
+    statement = statement.order_by(BookedDate.date)
+
+    result = await session.execute(statement)
+    return BookingDatesWithNotesResponse(
+        uuid=booking_object.uuid,
+        booked_dates=[
+            {"date": booked.date, "note": booked.note}
+            for booked in result.scalars().all()
+        ],
+    )
+
+
 @app.put("/objects/{object_uuid}/booked-dates", response_model=BookingDatesResponse)
 async def replace_booked_dates(
     object_uuid: UUID,
@@ -220,8 +264,14 @@ async def replace_booked_dates(
     await session.execute(
         delete(BookedDate).where(BookedDate.booking_object_id == booking_object.id)
     )
-    for value in payload.booked_dates:
-        session.add(BookedDate(booking_object_id=booking_object.id, date=value))
+    for booked_date in payload.booked_dates:
+        session.add(
+            BookedDate(
+                booking_object_id=booking_object.id,
+                date=booked_date.date,
+                note=booked_date.note,
+            )
+        )
 
     await session.commit()
     booking_object = await get_object_or_404(session, object_uuid)

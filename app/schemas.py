@@ -6,14 +6,15 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 class BookingObjectBase(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    image: HttpUrl
-    description: str = Field(min_length=1)
+    image: HttpUrl | None = None
+    description: str | None = Field(default=None, min_length=1)
 
 
 class BookingDateAdd(BaseModel):
     date: date_type | None = None
     start_date: date_type | None = None
     end_date: date_type | None = None
+    note: str | None = Field(default=None, max_length=255)
 
     @model_validator(mode="after")
     def validate_single_or_period(self) -> "BookingDateAdd":
@@ -28,14 +29,33 @@ class BookingDateAdd(BaseModel):
         return self
 
 
+class BookedDateInput(BaseModel):
+    date: date_type
+    note: str | None = Field(default=None, max_length=255)
+
+
 class BookingDatesReplace(BaseModel):
     access_key: str = Field(min_length=32, max_length=128)
-    booked_dates: list[date_type]
+    booked_dates: list[BookedDateInput]
+
+    @field_validator("booked_dates", mode="before")
+    @classmethod
+    def normalize_dates(cls, value: list[date_type | dict]) -> list[date_type | dict]:
+        return [
+            {"date": item} if not isinstance(item, dict) else item
+            for item in value
+        ]
 
     @field_validator("booked_dates")
     @classmethod
-    def deduplicate_dates(cls, value: list[date_type]) -> list[date_type]:
-        return sorted(set(value))
+    def deduplicate_dates(cls, value: list[BookedDateInput]) -> list[BookedDateInput]:
+        dates_by_value = {item.date: item for item in value}
+        return [dates_by_value[date_value] for date_value in sorted(dates_by_value)]
+
+
+class BookedDateWithNote(BaseModel):
+    date: date_type
+    note: str | None = None
 
 
 class BookingObjectRead(BookingObjectBase):
@@ -50,3 +70,8 @@ class BookingObjectCreateResponse(BookingObjectRead):
 class BookingDatesResponse(BaseModel):
     uuid: UUID
     booked_dates: list[date_type]
+
+
+class BookingDatesWithNotesResponse(BaseModel):
+    uuid: UUID
+    booked_dates: list[BookedDateWithNote]
