@@ -331,14 +331,13 @@ async def update_booked_date_note(
 
 @app.delete(
     "/objects/{object_uuid}/booked-dates/{booked_date}",
-    status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_booked_date(
     object_uuid: UUID,
     booked_date: date,
     access_key: Annotated[str, Query(min_length=32, max_length=128)],
     session: AsyncSession = Depends(get_session),
-) -> None:
+) -> dict[str, bool]:
     booking_object = await get_object_or_404(session, object_uuid)
     require_object_access(booking_object, access_key)
 
@@ -357,3 +356,4 @@ async def delete_booked_date(
 
     await session.delete(booked)
     await session.commit()
+    return {"success": True}
