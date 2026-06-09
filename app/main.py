@@ -78,6 +78,7 @@ async def get_object_or_404(session: AsyncSession, object_uuid: UUID) -> Booking
         select(BookingObject)
         .options(selectinload(BookingObject.booked_dates))
         .where(BookingObject.uuid == str(object_uuid))
+        .execution_options(populate_existing=True)
     )
     booking_object = result.scalar_one_or_none()
     if booking_object is None:
