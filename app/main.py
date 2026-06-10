@@ -427,6 +427,44 @@ async def update_booked_date_note(
     )
 
 
+@app.delete("/objects/{object_uuid}/booked-dates")
+async def delete_booked_dates_range(
+    object_uuid: UUID,
+    request: Request,
+    access_key: Annotated[str, Query(min_length=32, max_length=128)],
+    start_date: date,
+    end_date: date,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool | int]:
+    language = get_language(request)
+    if start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=t("date.invalid_period_order", language),
+        )
+
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, access_key, language)
+
+    result = await session.execute(
+        delete(BookedDate).where(
+            BookedDate.booking_object_id == booking_object.id,
+            BookedDate.date >= start_date,
+            BookedDate.date <= end_date,
+        )
+    )
+    deleted_count = result.rowcount or 0
+    if deleted_count == 0:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=t("booked_dates.not_found", language),
+        )
+
+    await session.commit()
+    return {"success": True, "deleted_count": deleted_count}
+
+
 @app.delete(
     "/objects/{object_uuid}/booked-dates/{booked_date}",
 )

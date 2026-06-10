@@ -166,6 +166,13 @@ curl -X DELETE "http://127.0.0.1:8000/objects/{uuid}/booked-dates/2026-08-01?acc
   -H "X-API-Key: change-me"
 ```
 
+Удалить диапазон дат включительно:
+
+```bash
+curl -X DELETE "http://127.0.0.1:8000/objects/{uuid}/booked-dates?access_key={access_key}&start_date=2026-08-01&end_date=2026-08-07" \
+  -H "X-API-Key: change-me"
+```
+
 Получить даты с заметками:
 
 ```bash
