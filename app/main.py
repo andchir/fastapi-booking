@@ -18,14 +18,19 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.db import create_db_schema, get_session
+from app.i18n import Language, get_language, t, translate_detail
 from app.models import BookedDate, BookingObject
 from app.schemas import (
     BookingDateAdd,
@@ -64,6 +69,42 @@ app = FastAPI(
 app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
 
+@app.exception_handler(StarletteHTTPException)
+async def localized_http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    language = get_language(request)
+    detail = (
+        translate_detail(exc.detail, language)
+        if isinstance(exc.detail, str)
+        else exc.detail
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": detail},
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def localized_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    language = get_language(request)
+    errors = exc.errors()
+    for error in errors:
+        message = error.get("msg")
+        if isinstance(message, str):
+            clean_message = message.removeprefix("Value error, ")
+            translated_message = translate_detail(clean_message, language)
+            if translated_message != clean_message:
+                error["msg"] = translated_message
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": jsonable_encoder(errors)},
+    )
+
+
 def serialize_object(
     booking_object: BookingObject, include_access_key: bool = False
 ) -> BookingObjectRead | BookingObjectCreateResponse:
@@ -79,7 +120,9 @@ def serialize_object(
     return BookingObjectRead(**data)
 
 
-async def get_object_or_404(session: AsyncSession, object_uuid: UUID) -> BookingObject:
+async def get_object_or_404(
+    session: AsyncSession, object_uuid: UUID, language: Language
+) -> BookingObject:
     result = await session.execute(
         select(BookingObject)
         .options(selectinload(BookingObject.booked_dates))
@@ -88,23 +131,29 @@ async def get_object_or_404(session: AsyncSession, object_uuid: UUID) -> Booking
     )
     booking_object = result.scalar_one_or_none()
     if booking_object is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Object not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=t("object.not_found", language),
+        )
     return booking_object
 
 
-def require_object_access(booking_object: BookingObject, access_key: str) -> None:
+def require_object_access(
+    booking_object: BookingObject, access_key: str, language: Language
+) -> None:
     if not compare_digest(booking_object.access_key, access_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid access key for this object.",
+            detail=t("object.invalid_access_key", language),
         )
 
 
 def save_uploaded_image(request: Request, image: UploadFile) -> str:
+    language = get_language(request)
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Uploaded file must be an image.",
+            detail=t("image.invalid_type", language),
         )
 
     suffix = Path(image.filename or "").suffix.lower()
@@ -117,21 +166,23 @@ def save_uploaded_image(request: Request, image: UploadFile) -> str:
     return str(request.url_for("uploads", path=filename))
 
 
-def parse_request_date(value: str) -> date:
+def parse_request_date(value: str, language: Language) -> date:
     try:
         return date.fromisoformat(value.strip())
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="date must be YYYY-MM-DD or YYYY-MM-DD - YYYY-MM-DD.",
+            detail=t("date.invalid_format", language),
         ) from exc
 
 
-def build_date_period(start_date: date, end_date: date) -> list[date]:
+def build_date_period(
+    start_date: date, end_date: date, language: Language
+) -> list[date]:
     if start_date > end_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="start_date must be earlier than or equal to end_date.",
+            detail=t("date.invalid_period_order", language),
         )
 
     current = start_date
@@ -142,7 +193,7 @@ def build_date_period(start_date: date, end_date: date) -> list[date]:
     return dates
 
 
-def dates_from_request(payload: BookingDateAdd) -> list[date]:
+def dates_from_request(payload: BookingDateAdd, language: Language) -> list[date]:
     if payload.date is not None:
         if isinstance(payload.date, date):
             return [payload.date]
@@ -150,19 +201,19 @@ def dates_from_request(payload: BookingDateAdd) -> list[date]:
         range_match = DATE_RANGE_RE.fullmatch(payload.date)
         if range_match is not None:
             start_date, end_date = (
-                parse_request_date(value) for value in range_match.groups()
+                parse_request_date(value, language) for value in range_match.groups()
             )
-            return build_date_period(start_date, end_date)
+            return build_date_period(start_date, end_date, language)
 
-        return [parse_request_date(payload.date)]
+        return [parse_request_date(payload.date, language)]
 
     if payload.start_date is None or payload.end_date is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Both start_date and end_date are required for a period.",
+            detail=t("date.period_required", language),
         )
 
-    return build_date_period(payload.start_date, payload.end_date)
+    return build_date_period(payload.start_date, payload.end_date, language)
 
 
 @app.get("/health", include_in_schema=False)
@@ -200,9 +251,11 @@ async def create_object(
 @app.get("/objects/{object_uuid}", response_model=BookingObjectRead)
 async def get_object(
     object_uuid: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> BookingObjectRead:
-    booking_object = await get_object_or_404(session, object_uuid)
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
     return serialize_object(booking_object)
 
 
@@ -216,8 +269,9 @@ async def update_object(
     image: Annotated[UploadFile | None, File()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> BookingObjectRead:
-    booking_object = await get_object_or_404(session, object_uuid)
-    require_object_access(booking_object, access_key)
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, access_key, language)
 
     if title is not None:
         booking_object.title = title
@@ -235,11 +289,13 @@ async def update_object(
 async def add_booked_dates(
     object_uuid: UUID,
     payload: BookingDateAdd,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> BookingDatesResponse:
-    booking_object = await get_object_or_404(session, object_uuid)
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
 
-    for value in dates_from_request(payload):
+    for value in dates_from_request(payload, language):
         session.add(
             BookedDate(
                 booking_object_id=booking_object.id,
@@ -254,10 +310,10 @@ async def add_booked_dates(
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="One or more dates are already booked for this object.",
+            detail=t("date.already_booked", language),
         ) from exc
 
-    booking_object = await get_object_or_404(session, object_uuid)
+    booking_object = await get_object_or_404(session, object_uuid, language)
     return BookingDatesResponse(
         uuid=booking_object.uuid,
         booked_dates=[booked.date for booked in booking_object.booked_dates],
@@ -270,19 +326,21 @@ async def add_booked_dates(
 )
 async def get_booked_dates_with_notes(
     object_uuid: UUID,
+    request: Request,
     access_key: Annotated[str, Query(min_length=32, max_length=128)],
     start_date: date | None = None,
     end_date: date | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> BookingDatesWithNotesResponse:
+    language = get_language(request)
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="start_date must be earlier than or equal to end_date.",
+            detail=t("date.invalid_period_order", language),
         )
 
-    booking_object = await get_object_or_404(session, object_uuid)
-    require_object_access(booking_object, access_key)
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, access_key, language)
 
     statement = select(BookedDate).where(BookedDate.booking_object_id == booking_object.id)
     if start_date is not None:
@@ -305,10 +363,12 @@ async def get_booked_dates_with_notes(
 async def replace_booked_dates(
     object_uuid: UUID,
     payload: BookingDatesReplace,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> BookingDatesResponse:
-    booking_object = await get_object_or_404(session, object_uuid)
-    require_object_access(booking_object, payload.access_key)
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, payload.access_key, language)
 
     await session.execute(
         delete(BookedDate).where(BookedDate.booking_object_id == booking_object.id)
@@ -323,7 +383,7 @@ async def replace_booked_dates(
         )
 
     await session.commit()
-    booking_object = await get_object_or_404(session, object_uuid)
+    booking_object = await get_object_or_404(session, object_uuid, language)
     return BookingDatesResponse(
         uuid=booking_object.uuid,
         booked_dates=[booked.date for booked in booking_object.booked_dates],
@@ -338,10 +398,12 @@ async def update_booked_date_note(
     object_uuid: UUID,
     booked_date: date,
     payload: BookingDateNoteUpdate,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> BookingDateWithNoteResponse:
-    booking_object = await get_object_or_404(session, object_uuid)
-    require_object_access(booking_object, payload.access_key)
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, payload.access_key, language)
 
     result = await session.execute(
         select(BookedDate).where(
@@ -353,7 +415,7 @@ async def update_booked_date_note(
     if booked is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booked date not found.",
+            detail=t("booked_date.not_found", language),
         )
 
     booked.note = payload.note
@@ -371,11 +433,13 @@ async def update_booked_date_note(
 async def delete_booked_date(
     object_uuid: UUID,
     booked_date: date,
+    request: Request,
     access_key: Annotated[str, Query(min_length=32, max_length=128)],
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, bool]:
-    booking_object = await get_object_or_404(session, object_uuid)
-    require_object_access(booking_object, access_key)
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, access_key, language)
 
     result = await session.execute(
         select(BookedDate).where(
@@ -387,7 +451,7 @@ async def delete_booked_date(
     if booked is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booked date not found.",
+            detail=t("booked_date.not_found", language),
         )
 
     await session.delete(booked)
