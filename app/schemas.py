@@ -11,7 +11,7 @@ class BookingObjectBase(BaseModel):
 
 
 class BookingDateAdd(BaseModel):
-    date: date_type | None = None
+    date: date_type | str | None = None
     start_date: date_type | None = None
     end_date: date_type | None = None
     note: str | None = Field(default=None, max_length=255)

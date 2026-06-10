@@ -81,6 +81,18 @@ curl -X POST http://127.0.0.1:8000/objects/{uuid}/booked-dates \
   }'
 ```
 
+Поле `date` также принимает диапазон дат строкой, границы включаются:
+
+```bash
+curl -X POST http://127.0.0.1:8000/objects/{uuid}/booked-dates \
+  -H "X-API-Key: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "date": "2026-06-06 - 2026-06-09",
+    "note": "Закрыто для обслуживания"
+  }'
+```
+
 Добавить период дат включительно:
 
 ```bash
@@ -157,4 +169,3 @@ curl "http://127.0.0.1:8000/objects/{uuid}/booked-dates?access_key={access_key}&
 ```
 
 Публичный `GET /objects/{uuid}` по-прежнему возвращает только массив дат без заметок.
-

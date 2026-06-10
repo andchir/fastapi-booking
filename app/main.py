@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
+import re
 from secrets import compare_digest, token_urlsafe
 from shutil import copyfileobj
 from typing import Annotated
@@ -37,6 +38,11 @@ from app.schemas import (
     BookingObjectRead,
 )
 from app.security import require_api_key
+
+
+DATE_RANGE_RE = re.compile(
+    r"^\s*(\d{4}-\d{2}-\d{2})\s+-\s+(\d{4}-\d{2}-\d{2})\s*$"
+)
 
 
 @asynccontextmanager
@@ -111,9 +117,44 @@ def save_uploaded_image(request: Request, image: UploadFile) -> str:
     return str(request.url_for("uploads", path=filename))
 
 
+def parse_request_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date must be YYYY-MM-DD or YYYY-MM-DD - YYYY-MM-DD.",
+        ) from exc
+
+
+def build_date_period(start_date: date, end_date: date) -> list[date]:
+    if start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be earlier than or equal to end_date.",
+        )
+
+    current = start_date
+    dates: list[date] = []
+    while current <= end_date:
+        dates.append(current)
+        current += timedelta(days=1)
+    return dates
+
+
 def dates_from_request(payload: BookingDateAdd) -> list[date]:
     if payload.date is not None:
-        return [payload.date]
+        if isinstance(payload.date, date):
+            return [payload.date]
+
+        range_match = DATE_RANGE_RE.fullmatch(payload.date)
+        if range_match is not None:
+            start_date, end_date = (
+                parse_request_date(value) for value in range_match.groups()
+            )
+            return build_date_period(start_date, end_date)
+
+        return [parse_request_date(payload.date)]
 
     if payload.start_date is None or payload.end_date is None:
         raise HTTPException(
@@ -121,12 +162,7 @@ def dates_from_request(payload: BookingDateAdd) -> list[date]:
             detail="Both start_date and end_date are required for a period.",
         )
 
-    current = payload.start_date
-    dates: list[date] = []
-    while current <= payload.end_date:
-        dates.append(current)
-        current += timedelta(days=1)
-    return dates
+    return build_date_period(payload.start_date, payload.end_date)
 
 
 @app.get("/health", include_in_schema=False)
