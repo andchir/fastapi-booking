@@ -50,6 +50,7 @@ uvicorn app.main:app --reload
 - `DATABASE_URL` - DSN MySQL в формате SQLAlchemy async, например `mysql+aiomysql://booking_user:booking_password@127.0.0.1:3306/booking_db`.
 - `APP_NAME` - название приложения в OpenAPI.
 - `UPLOAD_DIR` - локальная папка для загруженных изображений, по умолчанию `uploads`.
+- `IMAGE_MAX_SIZE_PX` - максимальная ширина или высота загружаемого изображения, по умолчанию `1000`.
 
 ## Язык сообщений
 

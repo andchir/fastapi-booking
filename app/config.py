@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +11,7 @@ class Settings(BaseSettings):
         "mysql+aiomysql://booking_user:booking_password@127.0.0.1:3306/booking_db"
     )
     upload_dir: str = "uploads"
+    image_max_size_px: int = Field(default=1000, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -3,7 +3,6 @@ from datetime import date, timedelta
 from pathlib import Path
 import re
 from secrets import compare_digest, token_urlsafe
-from shutil import copyfileobj
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -22,6 +21,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -160,8 +160,24 @@ def save_uploaded_image(request: Request, image: UploadFile) -> str:
     filename = f"{uuid4()}{suffix}"
     file_path = upload_dir / filename
 
-    with file_path.open("wb") as output:
-        copyfileobj(image.file, output)
+    try:
+        with Image.open(image.file) as source:
+            image_format = source.format
+            resized_image = ImageOps.exif_transpose(source)
+            resized_image.thumbnail(
+                (settings.image_max_size_px, settings.image_max_size_px),
+                Image.Resampling.LANCZOS,
+            )
+
+            if image_format == "JPEG" and resized_image.mode in ("RGBA", "P"):
+                resized_image = resized_image.convert("RGB")
+
+            resized_image.save(file_path, format=image_format)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=t("image.invalid_type", language),
+        ) from exc
 
     return str(request.url_for("uploads", path=filename))
 

@@ -93,6 +93,7 @@ APP_NAME=FastAPI Booking
 API_KEY=replace-with-long-random-api-key
 DATABASE_URL=mysql+aiomysql://booking_user:replace-with-strong-password@127.0.0.1:3306/booking_db
 UPLOAD_DIR=/opt/fastapi-booking/uploads
+IMAGE_MAX_SIZE_PX=1000
 ```
 
 Сгенерировать `API_KEY`:
