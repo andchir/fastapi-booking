@@ -63,6 +63,19 @@ class BookingDateNoteUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=255)
 
 
+class BookingDatesNoteUpdate(BaseModel):
+    access_key: str = Field(min_length=32, max_length=128)
+    start_date: date_type
+    end_date: date_type
+    note: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_period_order(self) -> "BookingDatesNoteUpdate":
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must be earlier than or equal to end_date.")
+        return self
+
+
 class BookingDateWithNoteResponse(BaseModel):
     uuid: UUID
     booked_date: BookedDateWithNote

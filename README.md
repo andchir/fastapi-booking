@@ -146,6 +146,22 @@ curl -X PUT http://127.0.0.1:8000/objects/{uuid}/booked-dates \
 }
 ```
 
+Обновить заметку периода дат:
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/objects/{uuid}/booked-dates \
+  -H "X-API-Key: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "access_key": "{access_key}",
+    "start_date": "2026-08-01",
+    "end_date": "2026-08-07",
+    "note": "Гость перенес время заезда"
+  }'
+```
+
+Все даты в периоде должны быть уже забронированы.
+
 Обновить заметку одной даты:
 
 ```bash

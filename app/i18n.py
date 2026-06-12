@@ -51,6 +51,10 @@ MESSAGES: dict[str, dict[Language, str]] = {
         "ru": "Забронированные даты в указанном диапазоне не найдены.",
         "en": "Booked dates in the specified range were not found.",
     },
+    "booked_dates.period_not_fully_booked": {
+        "ru": "Все даты в указанном периоде должны быть забронированы.",
+        "en": "All dates in the specified period must be booked.",
+    },
 }
 
 MESSAGE_KEYS_BY_ENGLISH = {

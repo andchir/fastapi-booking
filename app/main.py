@@ -36,6 +36,7 @@ from app.schemas import (
     BookingDateAdd,
     BookingDateNoteUpdate,
     BookingDateWithNoteResponse,
+    BookingDatesNoteUpdate,
     BookingDatesReplace,
     BookingDatesResponse,
     BookingDatesWithNotesResponse,
@@ -403,6 +404,51 @@ async def replace_booked_dates(
     return BookingDatesResponse(
         uuid=booking_object.uuid,
         booked_dates=[booked.date for booked in booking_object.booked_dates],
+    )
+
+
+@app.patch(
+    "/objects/{object_uuid}/booked-dates",
+    response_model=BookingDatesWithNotesResponse,
+)
+async def update_booked_dates_note(
+    object_uuid: UUID,
+    payload: BookingDatesNoteUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> BookingDatesWithNotesResponse:
+    language = get_language(request)
+    booking_object = await get_object_or_404(session, object_uuid, language)
+    require_object_access(booking_object, payload.access_key, language)
+
+    period_dates = build_date_period(payload.start_date, payload.end_date, language)
+    result = await session.execute(
+        select(BookedDate)
+        .where(
+            BookedDate.booking_object_id == booking_object.id,
+            BookedDate.date >= payload.start_date,
+            BookedDate.date <= payload.end_date,
+        )
+        .order_by(BookedDate.date)
+    )
+    booked_dates = result.scalars().all()
+    booked_dates_by_value = {booked.date: booked for booked in booked_dates}
+    if set(booked_dates_by_value) != set(period_dates):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=t("booked_dates.period_not_fully_booked", language),
+        )
+
+    for booked in booked_dates:
+        booked.note = payload.note
+
+    await session.commit()
+    return BookingDatesWithNotesResponse(
+        uuid=booking_object.uuid,
+        booked_dates=[
+            {"date": booked.date, "note": booked.note}
+            for booked in booked_dates
+        ],
     )
 
 
